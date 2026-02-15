@@ -21,6 +21,8 @@ def get_github_contributions(username, token=None):
           totalIssueContributions
           totalPullRequestContributions
           totalPullRequestReviewContributions
+          totalRepositoryContributions
+          restrictedContributionsCount
           contributionCalendar {
             totalContributions
             weeks {
@@ -218,6 +220,11 @@ def main():
     if not mibao_data:
         print("❌ Failed to fetch contribution data")
         return
+    
+    # 调试：打印原始数据
+    print(f"📋 Raw data keys: {mibao_data.keys()}")
+    if 'restrictedContributionsCount' in mibao_data:
+        print(f"🔒 Restricted contributions: {mibao_data['restrictedContributionsCount']}")
     
     # 提取数据
     calendar = mibao_data.get("contributionCalendar", {})
