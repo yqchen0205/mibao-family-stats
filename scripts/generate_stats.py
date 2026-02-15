@@ -200,6 +200,17 @@ def main():
     # 获取 GitHub Token
     token = os.environ.get("GITHUB_TOKEN")
     
+    # 调试信息
+    if token:
+        print(f"🔑 Token found (length: {len(token)})")
+        # 检查是否是默认的 GITHUB_TOKEN 还是自定义的 STATS_TOKEN
+        if token.startswith("ghs_"):
+            print("⚠️  Using default GITHUB_TOKEN - private repos may not be accessible")
+        else:
+            print("✅ Using custom token (PAT) - should have access to private repos")
+    else:
+        print("❌ No token found!")
+    
     # 获取咪咪一家的贡献数据
     print(f"📊 Fetching {MIBAO_USERNAME}'s contributions...")
     mibao_data = get_github_contributions(MIBAO_USERNAME, token)
