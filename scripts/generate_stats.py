@@ -133,20 +133,19 @@ def get_all_contributions(username, token=None):
         # 例如：("yqchen0205", "my-private-repo", "Mibao0211@163.com")
     ]
     
-    # 自动发现 Mibao0211 参与的仓库
-    print("📊 Scanning for additional repositories...")
-    since = (datetime.now() - timedelta(days=365)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    # 手动扫描特定仓库
+    # 配置需要扫描的仓库列表 (owner, repo, author_email)
+    repos_to_scan = [
+        # 可以在这里添加更多仓库
+    ]
     
-    # 使用 GraphQL 获取用户贡献过的仓库（包括 collaborator）
-    repos_query = """
+    # 尝试自动发现 yqchen0205 的仓库（因为 Mibao0211 的 commit 可能在爸宝的仓库里）
+    print("📊 Discovering yqchen0205's repositories...")
+    
+    discover_query = """
     query($username: String!) {
       user(login: $username) {
-        repositoriesContributedTo(
-          first: 100,
-          includeUserRepositories: true,
-          contributionTypes: [COMMIT]
-        ) {
-          totalCount
+        repositories(first: 100, privacy: PRIVATE, ownerAffiliations: OWNER) {
           nodes {
             nameWithOwner
             isPrivate
@@ -156,50 +155,39 @@ def get_all_contributions(username, token=None):
     }
     """
     
-    headers = {
-        "Authorization": f"Bearer {token}",
-        "Content-Type": "application/json"
-    } if token else {}
-    
-    repos_response = requests.post(
+    discover_response = requests.post(
         "https://api.github.com/graphql",
-        json={"query": repos_query, "variables": {"username": username}},
+        json={"query": discover_query, "variables": {"username": "yqchen0205"}},
         headers=headers
     )
     
-    manual_count = 0
-    if repos_response.status_code == 200:
-        repos_data = repos_response.json()
-        repos = repos_data.get("data", {}).get("user", {}).get("repositoriesContributedTo", {}).get("nodes", [])
+    if discover_response.status_code == 200:
+        discover_data = discover_response.json()
+        yq_repos = discover_data.get("data", {}).get("user", {}).get("repositories", {}).get("nodes", [])
+        print(f"   Found {len(yq_repos)} repositories from yqchen0205")
         
-        print(f"   Found {len(repos)} repositories contributed to")
-        
-        for repo in repos:
+        for repo in yq_repos:
             name_with_owner = repo.get("nameWithOwner", "")
-            is_private = repo.get("isPrivate", False)
-            
-            if not name_with_owner:
-                continue
-            
-            owner, repo_name = name_with_owner.split("/")
-            
-            # 只在 private 仓库中查找额外的 commit
-            if is_private:
-                print(f"   🔍 Checking {name_with_owner} (private)...")
-                
-                # 获取该仓库中 Mibao0211 的 commit（使用邮箱）
-                commits = get_repo_commits(owner, repo_name, "Mibao0211@163.com", since, token)
-                
-                for commit in commits:
-                    commit_date = commit.get("commit", {}).get("author", {}).get("date", "")[:10]
-                    if commit_date:
-                        contributions_by_date[commit_date] += 1
-                        manual_count += 1
-                
-                if commits:
-                    print(f"   ✓ Found {len(commits)} additional commits")
-    else:
-        print(f"   ✗ Error fetching repos: {repos_response.status_code}")
+            if name_with_owner:
+                repos_to_scan.append((name_with_owner.split("/")[0], name_with_owner.split("/")[1], "Mibao0211@163.com"))
+    
+    # 扫描配置的仓库
+    print("📊 Scanning configured repositories...")
+    manual_count = 0
+    
+    for owner, repo_name, author_email in repos_to_scan:
+        print(f"   🔍 Checking {owner}/{repo_name} for {author_email}...")
+        
+        commits = get_repo_commits(owner, repo_name, author_email, since, token)
+        
+        for commit in commits:
+            commit_date = commit.get("commit", {}).get("author", {}).get("date", "")[:10]
+            if commit_date:
+                contributions_by_date[commit_date] += 1
+                manual_count += 1
+        
+        if commits:
+            print(f"   ✓ Found {len(commits)} commits")
     
     total = sum(contributions_by_date.values())
     print(f"📊 Total after manual scan: {total} contributions")
