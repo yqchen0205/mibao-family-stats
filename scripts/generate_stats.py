@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
 """
 Mibao Family Contribution Stats Generator
-生成咪咪一家的 GitHub 贡献统计和可视化图表
-使用 GitHub GraphQL API 直接获取数据
+全面统计 GitHub 账号的贡献（支持手动添加特定仓库的 commit）
 """
 
 import os
@@ -11,8 +10,8 @@ import requests
 from datetime import datetime, timedelta
 from collections import defaultdict
 
-def get_github_contributions(username, token=None):
-    """使用 GitHub GraphQL API 获取用户的贡献数据"""
+def get_contributions_collection(username, token=None):
+    """使用 GitHub GraphQL API 获取官方贡献统计"""
     query = """
     query($username: String!, $from: DateTime!, $to: DateTime!) {
       user(login: $username) {
@@ -38,7 +37,6 @@ def get_github_contributions(username, token=None):
     }
     """
     
-    # 获取过去一年的日期范围
     to_date = datetime.now()
     from_date = to_date - timedelta(days=365)
     
@@ -63,13 +61,186 @@ def get_github_contributions(username, token=None):
         data = response.json()
         return data.get("data", {}).get("user", {}).get("contributionsCollection", {})
     else:
-        print(f"Error fetching data: {response.status_code}")
+        print(f"Error: {response.status_code}")
         print(response.text)
         return {}
 
-def generate_contribution_heatmap(calendar_data, title="🐱 Mibao Family Contributions"):
+def get_repo_commits(owner, repo, author_email, since, token=None):
+    """使用 GitHub REST API 获取特定仓库中指定作者的 commit"""
+    headers = {
+        "Authorization": f"token {token}",
+        "Accept": "application/vnd.github.v3+json"
+    } if token else {"Accept": "application/vnd.github.v3+json"}
+    
+    commits = []
+    page = 1
+    
+    while True:
+        url = f"https://api.github.com/repos/{owner}/{repo}/commits"
+        params = {
+            "author": author_email,  # 使用邮箱过滤
+            "since": since,
+            "per_page": 100,
+            "page": page
+        }
+        
+        response = requests.get(url, headers=headers, params=params)
+        
+        if response.status_code != 200:
+            print(f"   ✗ Error fetching {owner}/{repo}: {response.status_code}")
+            break
+        
+        data = response.json()
+        if not data:
+            break
+        
+        commits.extend(data)
+        
+        if len(data) < 100:
+            break
+        
+        page += 1
+        if page > 10:  # 限制最多 1000 条
+            break
+    
+    return commits
+
+def get_all_contributions(username, token=None):
+    """综合获取用户贡献数据"""
+    contributions_by_date = defaultdict(int)
+    
+    # 1. 从 contributionsCollection 获取基础数据
+    print("📊 Fetching from contributionsCollection...")
+    collection = get_contributions_collection(username, token)
+    
+    calendar = collection.get("contributionCalendar", {})
+    official_total = calendar.get("totalContributions", 0)
+    
+    print(f"   ✓ Official count: {official_total} contributions")
+    print(f"   ✓ Restricted (private): {collection.get('restrictedContributionsCount', 0)}")
+    
+    # 提取官方日历数据
+    for week in calendar.get("weeks", []):
+        for day in week.get("contributionDays", []):
+            date = day["date"]
+            count = day["contributionCount"]
+            contributions_by_date[date] = count
+    
+    # 2. 手动统计特定仓库的 commit（补充那些未被 GitHub 统计的）
+    # 配置需要额外统计的仓库
+    extra_repos = [
+        # (owner, repo, author_email)
+        # 例如：("yqchen0205", "my-private-repo", "Mibao0211@163.com")
+    ]
+    
+    # 自动发现 Mibao0211 参与的仓库
+    print("📊 Scanning for additional repositories...")
+    since = (datetime.now() - timedelta(days=365)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    
+    # 使用 GraphQL 获取用户拥有的仓库
+    repos_query = """
+    query($username: String!) {
+      user(login: $username) {
+        repositories(first: 100, ownerAffiliations: [OWNER, COLLABORATOR], isFork: false) {
+          nodes {
+            nameWithOwner
+            isPrivate
+          }
+        }
+      }
+    }
+    """
+    
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Content-Type": "application/json"
+    } if token else {}
+    
+    repos_response = requests.post(
+        "https://api.github.com/graphql",
+        json={"query": repos_query, "variables": {"username": username}},
+        headers=headers
+    )
+    
+    manual_count = 0
+    if repos_response.status_code == 200:
+        repos_data = repos_response.json()
+        repos = repos_data.get("data", {}).get("user", {}).get("repositories", {}).get("nodes", [])
+        
+        print(f"   Found {len(repos)} repositories")
+        
+        for repo in repos:
+            name_with_owner = repo.get("nameWithOwner", "")
+            is_private = repo.get("isPrivate", False)
+            
+            if not name_with_owner:
+                continue
+            
+            owner, repo_name = name_with_owner.split("/")
+            
+            # 只在 private 仓库中查找额外的 commit
+            if is_private:
+                print(f"   🔍 Checking {name_with_owner} (private)...")
+                
+                # 获取该仓库中 Mibao0211 的 commit
+                commits = get_repo_commits(owner, repo_name, username, since, token)
+                
+                for commit in commits:
+                    commit_date = commit.get("commit", {}).get("author", {}).get("date", "")[:10]
+                    if commit_date:
+                        contributions_by_date[commit_date] += 1
+                        manual_count += 1
+                
+                if commits:
+                    print(f"   ✓ Found {len(commits)} additional commits")
+    
+    total = sum(contributions_by_date.values())
+    print(f"📊 Total after manual scan: {total} contributions")
+    print(f"   (Added {manual_count} from manual scan)")
+    
+    return {
+        "contributions_by_date": dict(contributions_by_date),
+        "calendar": calendar,
+        "total_contributions": total,
+        "official_count": official_total,
+        "manual_count": manual_count
+    }
+
+def generate_contribution_heatmap(contributions_by_date, title="🐱 Mibao Family Contributions"):
     """生成 SVG 贡献热力图"""
-    weeks = calendar_data.get("weeks", [])
+    
+    # 生成过去一年的日历数据
+    weeks = []
+    today = datetime.now()
+    start_date = today - timedelta(days=364)
+    start_date = start_date - timedelta(days=start_date.weekday())
+    
+    for week_idx in range(53):
+        week_data = {"contributionDays": []}
+        for day_idx in range(7):
+            date = start_date + timedelta(days=week_idx * 7 + day_idx)
+            date_str = date.strftime("%Y-%m-%d")
+            
+            count = contributions_by_date.get(date_str, 0)
+            
+            # 确定颜色
+            if count == 0:
+                color = "#ebedf0"
+            elif count <= 2:
+                color = "#9be9a8"
+            elif count <= 5:
+                color = "#40c463"
+            elif count <= 10:
+                color = "#30a14e"
+            else:
+                color = "#216e39"
+            
+            week_data["contributionDays"].append({
+                "date": date_str,
+                "contributionCount": count,
+                "color": color
+            })
+        weeks.append(week_data)
     
     svg_width = 828
     svg_height = 140
@@ -110,7 +281,6 @@ def generate_contribution_heatmap(calendar_data, title="🐱 Mibao Family Contri
             x = week_idx * (cell_size + cell_gap)
             y = day_idx * (cell_size + cell_gap)
             
-            # 添加 tooltip 标题
             tooltip = f"{day['date']}: {count} contributions"
             
             svg_parts.append(
@@ -124,11 +294,10 @@ def generate_contribution_heatmap(calendar_data, title="🐱 Mibao Family Contri
     legend_y = 85
     legend_x = 10
     legend_colors = ["#ebedf0", "#9be9a8", "#40c463", "#30a14e", "#216e39"]
-    legend_labels = ["No", "Low", "Medium", "High", "Very High"]
     
     svg_parts.append(f'<text x="{legend_x}" y="{legend_y + 10}" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, Helvetica, Arial, sans-serif" font-size="10" fill="#767676">Less</text>')
     
-    for i, (color, label) in enumerate(zip(legend_colors, legend_labels)):
+    for i, color in enumerate(legend_colors):
         x = legend_x + 35 + i * 15
         svg_parts.append(f'<rect x="{x}" y="{legend_y}" width="{cell_size}" height="{cell_size}" fill="{color}" rx="2"/>')
     
@@ -141,54 +310,39 @@ def generate_contribution_heatmap(calendar_data, title="🐱 Mibao Family Contri
     
     return '\n'.join(svg_parts)
 
-def calculate_streak(weeks):
+def calculate_streak(contributions_by_date):
     """计算当前连续贡献天数"""
     today = datetime.now()
     streak = 0
     
-    # 收集所有有贡献的日期
-    contribution_dates = set()
-    for week in weeks:
-        for day in week.get("contributionDays", []):
-            if day.get("contributionCount", 0) > 0:
-                contribution_dates.add(day["date"])
-    
-    # 计算连续天数
     for i in range(365):
         date = (today - timedelta(days=i)).strftime("%Y-%m-%d")
-        if date in contribution_dates:
+        if contributions_by_date.get(date, 0) > 0:
             streak += 1
-        elif i > 0:  # 跳过今天
+        elif i > 0:
             break
     
     return streak
 
-def calculate_max_streak(weeks):
+def calculate_max_streak(contributions_by_date):
     """计算最大连续贡献天数"""
     max_streak = 0
     current_streak = 0
     
-    # 收集所有有贡献的日期
-    contribution_dates = set()
-    for week in weeks:
-        for day in week.get("contributionDays", []):
-            if day.get("contributionCount", 0) > 0:
-                contribution_dates.add(day["date"])
-    
-    # 排序日期
-    sorted_dates = sorted(contribution_dates)
+    sorted_dates = sorted(contributions_by_date.keys())
     
     prev_date = None
     for date_str in sorted_dates:
-        current = datetime.strptime(date_str, "%Y-%m-%d")
-        
-        if prev_date and (current - prev_date).days == 1:
-            current_streak += 1
-        else:
-            current_streak = 1
-        
-        max_streak = max(max_streak, current_streak)
-        prev_date = current
+        if contributions_by_date[date_str] > 0:
+            current = datetime.strptime(date_str, "%Y-%m-%d")
+            
+            if prev_date and (current - prev_date).days == 1:
+                current_streak += 1
+            else:
+                current_streak = 1
+            
+            max_streak = max(max_streak, current_streak)
+            prev_date = current
     
     return max_streak
 
@@ -205,41 +359,43 @@ def main():
     # 调试信息
     if token:
         print(f"🔑 Token found (length: {len(token)})")
-        # 检查是否是默认的 GITHUB_TOKEN 还是自定义的 STATS_TOKEN
         if token.startswith("ghs_"):
-            print("⚠️  Using default GITHUB_TOKEN - private repos may not be accessible")
+            print("⚠️  Using default GITHUB_TOKEN")
         else:
-            print("✅ Using custom token (PAT) - should have access to private repos")
+            print("✅ Using custom PAT token")
     else:
         print("❌ No token found!")
     
-    # 获取咪咪一家的贡献数据
+    # 获取贡献数据
     print(f"📊 Fetching {MIBAO_USERNAME}'s contributions...")
-    mibao_data = get_github_contributions(MIBAO_USERNAME, token)
+    result = get_all_contributions(MIBAO_USERNAME, token)
     
-    if not mibao_data:
+    if not result:
         print("❌ Failed to fetch contribution data")
         return
     
-    # 调试：打印原始数据
-    print(f"📋 Raw data keys: {mibao_data.keys()}")
-    if 'restrictedContributionsCount' in mibao_data:
-        print(f"🔒 Restricted contributions: {mibao_data['restrictedContributionsCount']}")
+    contributions_by_date = result["contributions_by_date"]
+    total_contributions = result["total_contributions"]
     
-    # 提取数据
-    calendar = mibao_data.get("contributionCalendar", {})
-    total_contributions = calendar.get("totalContributions", 0)
-    weeks = calendar.get("weeks", [])
+    print(f"\n📊 Summary:")
+    print(f"   • Official GitHub count: {result['official_count']}")
+    print(f"   • Manual scan added: {result['manual_count']}")
+    print(f"   • Total: {total_contributions} contributions")
     
     # 计算统计
-    current_streak = calculate_streak(weeks)
-    max_streak = calculate_max_streak(weeks)
+    current_streak = calculate_streak(contributions_by_date)
+    max_streak = calculate_max_streak(contributions_by_date)
+    
+    print(f"🔥 Current streak: {current_streak} days")
+    print(f"🏆 Max streak: {max_streak} days")
     
     stats = {
         "total_commits": total_contributions,
+        "official_count": result["official_count"],
+        "manual_count": result["manual_count"],
         "current_streak": current_streak,
         "max_streak": max_streak,
-        "calendar": calendar,
+        "contributions_by_date": contributions_by_date,
         "fetched_at": datetime.now().isoformat()
     }
     
@@ -249,17 +405,14 @@ def main():
         json.dump(stats, f, ensure_ascii=False, indent=2)
     
     # 生成 SVG 图表
-    svg_content = generate_contribution_heatmap(calendar, "🐱 Mibao Family Contributions")
+    svg_content = generate_contribution_heatmap(contributions_by_date, "🐱 Mibao Family Contributions")
     with open("stats/contributions.svg", "w", encoding="utf-8") as f:
         f.write(svg_content)
     
     # 生成 Markdown 报告
     generate_markdown_report(stats)
     
-    print(f"✅ Done!")
-    print(f"   Total contributions: {total_contributions}")
-    print(f"   Current streak: {current_streak} days")
-    print(f"   Max streak: {max_streak} days")
+    print(f"\n✅ Done! Total: {total_contributions} contributions")
 
 def generate_markdown_report(stats):
     """生成 Markdown 报告"""
@@ -268,6 +421,9 @@ def generate_markdown_report(stats):
 > Last updated: {datetime.now().strftime("%Y-%m-%d %H:%M UTC")}
 
 **{stats['total_commits']} contributions in the last year**
+
+- Official GitHub count: {stats['official_count']}
+- Additional from manual scan: {stats['manual_count']}
 
 ## 📈 Contribution Graph
 
