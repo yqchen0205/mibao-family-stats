@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-Mibao Family Contribution Stats Generator
-全面统计 GitHub 账号的贡献（支持手动添加特定仓库的 commit）
+Mibao Family Contribution Stats Generator - Full Commit Mode
+全面统计指定邮箱的所有 commit（绕过 GitHub 原生 contribution 规则）
 """
 
 import os
@@ -10,67 +10,54 @@ import requests
 from datetime import datetime, timedelta
 from collections import defaultdict
 
-def get_contributions_collection(username, token=None):
-    """使用 GitHub GraphQL API 获取官方贡献统计"""
-    query = """
-    query($username: String!, $from: DateTime!, $to: DateTime!) {
-      user(login: $username) {
-        contributionsCollection(from: $from, to: $to) {
-          totalCommitContributions
-          totalIssueContributions
-          totalPullRequestContributions
-          totalPullRequestReviewContributions
-          totalRepositoryContributions
-          restrictedContributionsCount
-          contributionCalendar {
-            totalContributions
-            weeks {
-              contributionDays {
-                date
-                contributionCount
-                color
-              }
-            }
-          }
-        }
-      }
-    }
-    """
-    
-    to_date = datetime.now()
-    from_date = to_date - timedelta(days=365)
-    
-    variables = {
-        "username": username,
-        "from": from_date.strftime("%Y-%m-%dT%H:%M:%SZ"),
-        "to": to_date.strftime("%Y-%m-%dT%H:%M:%SZ")
-    }
-    
-    headers = {
-        "Authorization": f"Bearer {token}",
-        "Content-Type": "application/json"
-    } if token else {}
-    
-    response = requests.post(
-        "https://api.github.com/graphql",
-        json={"query": query, "variables": variables},
-        headers=headers
-    )
-    
-    if response.status_code == 200:
-        data = response.json()
-        return data.get("data", {}).get("user", {}).get("contributionsCollection", {})
-    else:
-        print(f"Error: {response.status_code}")
-        print(response.text)
-        return {}
-
-def get_repo_commits(owner, repo, author_email, since, token=None):
-    """使用 GitHub REST API 获取特定仓库中指定作者的 commit"""
+def get_all_repos(token, username="yqchen0205"):
+    """获取用户可访问的所有仓库（包括 private）"""
     headers = {
         "Authorization": f"token {token}",
         "Accept": "application/vnd.github.v3+json"
-    } if token else {"Accept": "application/vnd.github.v3+json"}
+    }
+    
+    repos = []
+    page = 1
+    
+    while True:
+        # 获取用户有权限的仓库（包括 collaborator）
+        url = f"https://api.github.com/user/repos"
+        params = {
+            "per_page": 100,
+            "page": page,
+            "affiliation": "owner,collaborator,organization_member",
+            "sort": "updated",
+            "direction": "desc"
+        }
+        
+        response = requests.get(url, headers=headers, params=params)
+        
+        if response.status_code != 200:
+            print(f"   ✗ Error fetching repos: {response.status_code}")
+            break
+        
+        data = response.json()
+        if not data:
+            break
+        
+        repos.extend(data)
+        
+        if len(data) < 100:
+            break
+        
+        page += 1
+        if page > 10:
+            break
+    
+    return repos
+
+def get_repo_commits(owner, repo, author_email, since, token):
+    """获取仓库中指定作者的 commits"""
+    headers = {
+        "Authorization": f"token {token}",
+        "Accept": "application/vnd.github.v3+json"
+    }
     
     commits = []
     page = 1
@@ -78,7 +65,7 @@ def get_repo_commits(owner, repo, author_email, since, token=None):
     while True:
         url = f"https://api.github.com/repos/{owner}/{repo}/commits"
         params = {
-            "author": author_email,  # 使用邮箱过滤
+            "author": author_email,
             "since": since,
             "per_page": 100,
             "page": page
@@ -87,11 +74,13 @@ def get_repo_commits(owner, repo, author_email, since, token=None):
         response = requests.get(url, headers=headers, params=params)
         
         if response.status_code != 200:
+            if response.status_code == 409:  # Empty repo or other issue
+                break
             print(f"   ✗ Error fetching {owner}/{repo}: {response.status_code}")
             break
         
         data = response.json()
-        if not data:
+        if not data or not isinstance(data, list):
             break
         
         commits.extend(data)
@@ -100,112 +89,10 @@ def get_repo_commits(owner, repo, author_email, since, token=None):
             break
         
         page += 1
-        if page > 10:  # 限制最多 1000 条
+        if page > 10:
             break
     
     return commits
-
-def get_all_contributions(username, token=None):
-    """综合获取用户贡献数据"""
-    contributions_by_date = defaultdict(int)
-    
-    # 1. 从 contributionsCollection 获取基础数据
-    print("📊 Fetching from contributionsCollection...")
-    collection = get_contributions_collection(username, token)
-    
-    calendar = collection.get("contributionCalendar", {})
-    official_total = calendar.get("totalContributions", 0)
-    
-    print(f"   ✓ Official count: {official_total} contributions")
-    print(f"   ✓ Restricted (private): {collection.get('restrictedContributionsCount', 0)}")
-    
-    # 提取官方日历数据
-    for week in calendar.get("weeks", []):
-        for day in week.get("contributionDays", []):
-            date = day["date"]
-            count = day["contributionCount"]
-            contributions_by_date[date] = count
-    
-    # 2. 手动统计特定仓库的 commit（补充那些未被 GitHub 统计的）
-    # 配置需要额外统计的仓库
-    extra_repos = [
-        # (owner, repo, author_email)
-        # 例如：("yqchen0205", "my-private-repo", "Mibao0211@163.com")
-    ]
-    
-    # 手动扫描特定仓库
-    # 配置需要扫描的仓库列表 (owner, repo, author_email)
-    repos_to_scan = [
-        # 可以在这里添加更多仓库
-    ]
-    
-    # 尝试自动发现 yqchen0205 的仓库（因为 Mibao0211 的 commit 可能在爸宝的仓库里）
-    print("📊 Discovering yqchen0205's repositories...")
-    
-    # 确保 headers 已定义
-    headers = {
-        "Authorization": f"Bearer {token}",
-        "Content-Type": "application/json"
-    } if token else {}
-    
-    discover_query = """
-    query($username: String!) {
-      user(login: $username) {
-        repositories(first: 100, privacy: PRIVATE, ownerAffiliations: OWNER) {
-          nodes {
-            nameWithOwner
-            isPrivate
-          }
-        }
-      }
-    }
-    """
-    
-    discover_response = requests.post(
-        "https://api.github.com/graphql",
-        json={"query": discover_query, "variables": {"username": "yqchen0205"}},
-        headers=headers
-    )
-    
-    if discover_response.status_code == 200:
-        discover_data = discover_response.json()
-        yq_repos = discover_data.get("data", {}).get("user", {}).get("repositories", {}).get("nodes", [])
-        print(f"   Found {len(yq_repos)} repositories from yqchen0205")
-        
-        for repo in yq_repos:
-            name_with_owner = repo.get("nameWithOwner", "")
-            if name_with_owner:
-                repos_to_scan.append((name_with_owner.split("/")[0], name_with_owner.split("/")[1], "Mibao0211@163.com"))
-    
-    # 扫描配置的仓库
-    print("📊 Scanning configured repositories...")
-    manual_count = 0
-    
-    for owner, repo_name, author_email in repos_to_scan:
-        print(f"   🔍 Checking {owner}/{repo_name} for {author_email}...")
-        
-        commits = get_repo_commits(owner, repo_name, author_email, since, token)
-        
-        for commit in commits:
-            commit_date = commit.get("commit", {}).get("author", {}).get("date", "")[:10]
-            if commit_date:
-                contributions_by_date[commit_date] += 1
-                manual_count += 1
-        
-        if commits:
-            print(f"   ✓ Found {len(commits)} commits")
-    
-    total = sum(contributions_by_date.values())
-    print(f"📊 Total after manual scan: {total} contributions")
-    print(f"   (Added {manual_count} from manual scan)")
-    
-    return {
-        "contributions_by_date": dict(contributions_by_date),
-        "calendar": calendar,
-        "total_contributions": total,
-        "official_count": official_total,
-        "manual_count": manual_count
-    }
 
 def generate_contribution_heatmap(contributions_by_date, title="🐱 Mibao Family Contributions"):
     """生成 SVG 贡献热力图"""
@@ -282,7 +169,7 @@ def generate_contribution_heatmap(contributions_by_date, title="🐱 Mibao Famil
             x = week_idx * (cell_size + cell_gap)
             y = day_idx * (cell_size + cell_gap)
             
-            tooltip = f"{day['date']}: {count} contributions"
+            tooltip = f"{day['date']}: {count} commits"
             
             svg_parts.append(
                 f'<rect x="{x}" y="{y}" width="{cell_size}" height="{cell_size}" '
@@ -349,54 +236,78 @@ def calculate_max_streak(contributions_by_date):
 
 def main():
     """主函数"""
-    print("🐱 Generating Mibao Family Contribution Stats...")
+    print("🐱 Generating Mibao Family Contribution Stats (Full Commit Mode)...")
     
-    # GitHub 用户名 - 咪咪一家的账号
-    MIBAO_USERNAME = "Mibao0211"
+    # 配置
+    AUTHOR_EMAIL = "Mibao0211@163.com"  # 要统计的邮箱
     
     # 获取 GitHub Token
     token = os.environ.get("GITHUB_TOKEN")
     
-    # 调试信息
-    if token:
-        print(f"🔑 Token found (length: {len(token)})")
-        if token.startswith("ghs_"):
-            print("⚠️  Using default GITHUB_TOKEN")
-        else:
-            print("✅ Using custom PAT token")
-    else:
-        print("❌ No token found!")
-    
-    # 获取贡献数据
-    print(f"📊 Fetching {MIBAO_USERNAME}'s contributions...")
-    result = get_all_contributions(MIBAO_USERNAME, token)
-    
-    if not result:
-        print("❌ Failed to fetch contribution data")
+    if not token:
+        print("❌ No GITHUB_TOKEN found!")
         return
     
-    contributions_by_date = result["contributions_by_date"]
-    total_contributions = result["total_contributions"]
+    print(f"🔑 Token found (length: {len(token)})")
+    
+    # 获取过去一年的日期
+    since = (datetime.now() - timedelta(days=365)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    
+    # 获取所有可访问的仓库
+    print("📊 Discovering accessible repositories...")
+    repos = get_all_repos(token)
+    print(f"   Found {len(repos)} repositories")
+    
+    # 统计每个仓库的 commit
+    contributions_by_date = defaultdict(int)
+    total_commits = 0
+    repos_with_commits = 0
+    
+    for repo in repos:
+        owner = repo.get("owner", {}).get("login", "")
+        repo_name = repo.get("name", "")
+        full_name = f"{owner}/{repo_name}"
+        is_private = repo.get("private", False)
+        
+        if not owner or not repo_name:
+            continue
+        
+        privacy_tag = "(private)" if is_private else "(public)"
+        print(f"   🔍 Checking {full_name} {privacy_tag}...", end=" ")
+        
+        commits = get_repo_commits(owner, repo_name, AUTHOR_EMAIL, since, token)
+        
+        if commits:
+            repos_with_commits += 1
+            print(f"✓ {len(commits)} commits")
+            
+            for commit in commits:
+                commit_date = commit.get("commit", {}).get("author", {}).get("date", "")[:10]
+                if commit_date:
+                    contributions_by_date[commit_date] += 1
+                    total_commits += 1
+        else:
+            print("0")
     
     print(f"\n📊 Summary:")
-    print(f"   • Official GitHub count: {result['official_count']}")
-    print(f"   • Manual scan added: {result['manual_count']}")
-    print(f"   • Total: {total_contributions} contributions")
+    print(f"   • Repositories scanned: {len(repos)}")
+    print(f"   • Repositories with commits: {repos_with_commits}")
+    print(f"   • Total commits: {total_commits}")
     
     # 计算统计
     current_streak = calculate_streak(contributions_by_date)
     max_streak = calculate_max_streak(contributions_by_date)
     
-    print(f"🔥 Current streak: {current_streak} days")
-    print(f"🏆 Max streak: {max_streak} days")
+    print(f"   • Current streak: {current_streak} days")
+    print(f"   • Max streak: {max_streak} days")
     
     stats = {
-        "total_commits": total_contributions,
-        "official_count": result["official_count"],
-        "manual_count": result["manual_count"],
+        "total_commits": total_commits,
+        "repos_scanned": len(repos),
+        "repos_with_commits": repos_with_commits,
         "current_streak": current_streak,
         "max_streak": max_streak,
-        "contributions_by_date": contributions_by_date,
+        "contributions_by_date": dict(contributions_by_date),
         "fetched_at": datetime.now().isoformat()
     }
     
@@ -413,18 +324,19 @@ def main():
     # 生成 Markdown 报告
     generate_markdown_report(stats)
     
-    print(f"\n✅ Done! Total: {total_contributions} contributions")
+    print(f"\n✅ Done! Total: {total_commits} commits")
 
 def generate_markdown_report(stats):
     """生成 Markdown 报告"""
     report = f"""# 🐱 Mibao Family Contributions
 
 > Last updated: {datetime.now().strftime("%Y-%m-%d %H:%M UTC")}
+> Mode: Full Commit Scan (bypass GitHub native contribution rules)
 
-**{stats['total_commits']} contributions in the last year**
+**{stats['total_commits']} commits in the last year**
 
-- Official GitHub count: {stats['official_count']}
-- Additional from manual scan: {stats['manual_count']}
+- Repositories scanned: {stats['repos_scanned']}
+- Repositories with commits: {stats['repos_with_commits']}
 
 ## 📈 Contribution Graph
 
