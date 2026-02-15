@@ -1,0 +1,40 @@
+name: Generate Mibao Family Contributions
+
+on:
+  schedule:
+    # 每天 UTC 00:00 运行 (北京时间 08:00)
+    - cron: '0 0 * * *'
+  workflow_dispatch:  # 支持手动触发
+  push:
+    branches: [ main ]
+
+jobs:
+  generate-stats:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+        
+    - name: Install dependencies
+      run: |
+        pip install requests Pillow
+        
+    - name: Generate contribution stats
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      run: python scripts/generate_stats.py
+      
+    - name: Commit and push changes
+      run: |
+        git config --local user.email "action@github.com"
+        git config --local user.name "GitHub Action"
+        git add -A
+        git diff --staged --quiet || (git commit -m "Update Mibao Family contribution stats [$(date +%Y-%m-%d)]" && git push)
