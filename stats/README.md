@@ -1,11 +1,12 @@
 # 🐱 Mibao Family Contributions
 
-> Last updated: 2026-02-15 09:40 UTC
+> Last updated: 2026-02-15 09:50 UTC
+> Mode: Full Commit Scan (bypass GitHub native contribution rules)
 
-**1 contributions in the last year**
+**56 commits in the last year**
 
-- Official GitHub count: 1
-- Additional from manual scan: 0
+- Repositories scanned: 34
+- Repositories with commits: 5
 
 ## 📈 Contribution Graph
 
@@ -13,8 +14,8 @@
 
 ## 🔥 Streak Stats
 
-- **Current Streak**: 0 days
-- **Max Streak**: 1 days
+- **Current Streak**: 1 days
+- **Max Streak**: 2 days
 
 ---
 
