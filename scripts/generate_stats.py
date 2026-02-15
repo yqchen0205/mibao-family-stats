@@ -137,11 +137,16 @@ def get_all_contributions(username, token=None):
     print("📊 Scanning for additional repositories...")
     since = (datetime.now() - timedelta(days=365)).strftime("%Y-%m-%dT%H:%M:%SZ")
     
-    # 使用 GraphQL 获取用户拥有的仓库
+    # 使用 GraphQL 获取用户贡献过的仓库（包括 collaborator）
     repos_query = """
     query($username: String!) {
       user(login: $username) {
-        repositories(first: 100, ownerAffiliations: [OWNER, COLLABORATOR], isFork: false) {
+        repositoriesContributedTo(
+          first: 100,
+          includeUserRepositories: true,
+          contributionTypes: [COMMIT]
+        ) {
+          totalCount
           nodes {
             nameWithOwner
             isPrivate
@@ -165,9 +170,9 @@ def get_all_contributions(username, token=None):
     manual_count = 0
     if repos_response.status_code == 200:
         repos_data = repos_response.json()
-        repos = repos_data.get("data", {}).get("user", {}).get("repositories", {}).get("nodes", [])
+        repos = repos_data.get("data", {}).get("user", {}).get("repositoriesContributedTo", {}).get("nodes", [])
         
-        print(f"   Found {len(repos)} repositories")
+        print(f"   Found {len(repos)} repositories contributed to")
         
         for repo in repos:
             name_with_owner = repo.get("nameWithOwner", "")
@@ -182,8 +187,8 @@ def get_all_contributions(username, token=None):
             if is_private:
                 print(f"   🔍 Checking {name_with_owner} (private)...")
                 
-                # 获取该仓库中 Mibao0211 的 commit
-                commits = get_repo_commits(owner, repo_name, username, since, token)
+                # 获取该仓库中 Mibao0211 的 commit（使用邮箱）
+                commits = get_repo_commits(owner, repo_name, "Mibao0211@163.com", since, token)
                 
                 for commit in commits:
                     commit_date = commit.get("commit", {}).get("author", {}).get("date", "")[:10]
@@ -193,6 +198,8 @@ def get_all_contributions(username, token=None):
                 
                 if commits:
                     print(f"   ✓ Found {len(commits)} additional commits")
+    else:
+        print(f"   ✗ Error fetching repos: {repos_response.status_code}")
     
     total = sum(contributions_by_date.values())
     print(f"📊 Total after manual scan: {total} contributions")
