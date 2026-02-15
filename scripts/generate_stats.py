@@ -142,6 +142,12 @@ def get_all_contributions(username, token=None):
     # 尝试自动发现 yqchen0205 的仓库（因为 Mibao0211 的 commit 可能在爸宝的仓库里）
     print("📊 Discovering yqchen0205's repositories...")
     
+    # 确保 headers 已定义
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Content-Type": "application/json"
+    } if token else {}
+    
     discover_query = """
     query($username: String!) {
       user(login: $username) {
