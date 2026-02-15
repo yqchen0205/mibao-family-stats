@@ -32,7 +32,7 @@ jobs:
         
     - name: Generate contribution stats
       env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        GITHUB_TOKEN: ${{ secrets.STATS_TOKEN || secrets.GITHUB_TOKEN }}
       run: python scripts/generate_stats.py
       
     - name: Commit and push changes
