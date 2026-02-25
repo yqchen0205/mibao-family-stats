@@ -8,7 +8,7 @@
 
 ## 📊 Statistics
 
-> Auto-generated daily
+> Auto-generated hourly
 
 | Category | Count |
 |----------|-------|
@@ -17,8 +17,9 @@
 
 ## 🔧 How it works
 
-- Daily automatic update via GitHub Actions
-- Aggregates contributions from Mibao Family members
+- Hourly automatic update via GitHub Actions
+- Aggregates commits from multiple tracked emails (private + public accessible repos)
+- Date bucketing uses Asia/Shanghai (UTC+8)
 
 ---
 
