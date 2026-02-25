@@ -574,6 +574,14 @@ def generate_contribution_heatmap(
 
 
 def generate_markdown_report(stats: Dict) -> None:
+    cache_token = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
+    fetched_at = stats.get("fetched_at")
+    if isinstance(fetched_at, str) and fetched_at:
+        try:
+            cache_token = parse_iso8601(fetched_at).strftime("%Y%m%d%H%M%S")
+        except ValueError:
+            pass
+
     report = f"""# Mibao Family Contributions
 
 > Last updated: {datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")}
@@ -590,7 +598,7 @@ def generate_markdown_report(stats: Dict) -> None:
 
 ## Contribution Graph
 
-![Contributions](./contributions.svg)
+![Contributions](./contributions.svg?ts={cache_token})
 
 ## Streak Stats
 
