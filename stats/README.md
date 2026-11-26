@@ -1,12 +1,12 @@
 # Mibao Family Contributions
 
-> Last updated: 2026-11-25 22:21 UTC
+> Last updated: 2026-11-26 14:57 UTC
 > Mode: Full commit scan across all accessible repos and branches
 > Refresh: Hourly via GitHub Actions
 > Date bucket timezone: Asia/Shanghai (UTC+8)
 > Sync mode: incremental
 
-**529 commits in the last year**
+**528 commits in the last year**
 
 - Repositories scanned this run: 151
 - Repositories with commits in 365-day window: 215
@@ -14,7 +14,7 @@
 
 ## Contribution Graph
 
-![Contributions](./contributions.svg?ts=20261125221845)
+![Contributions](./contributions.svg?ts=20261126145416)
 
 ## Streak Stats
 
